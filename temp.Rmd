@@ -1,0 +1,239 @@
+---
+title: "Question 1"
+output: html_document
+---
+
+```{r}
+library(httr)
+library(tidyverse)
+library(tidytext)
+library(jsonlite)
+library(rvest) # read_html
+library(wordcloud)
+library(gapminder)
+myKey <- Sys.getenv("THE_GUARDIAN_KEY")
+```
+
+
+
+```{r}
+query <- fromJSON("http://content.guardianapis.com/world/russia?api-key=test")
+query$response
+	
+```
+
+```{r}
+
+country <- "s"
+query_url <- paste("http://content.guardianapis.com/us-news?page-size=100&api-key=", myKey, sep="")
+query <- fromJSON(query_url)
+query_df <- query$response$results
+
+news_df <- NULL
+for (i in seq_len(nrow(query_df))) {
+  temp_url <- query_df[i,'webUrl']
+  html <- read_html(temp_url)
+  
+  text <- html %>%
+    html_nodes("p") %>%
+    html_text()
+  text <- paste(text, collapse = '')
+
+  news_df <- bind_rows(
+    news_df,
+    tibble(id=i, text=text)
+  )
+}
+
+data(stop_words)
+news_df2 <- news_df %>%
+  unnest_tokens(word, text) %>% 
+  anti_join(stop_words, by="word") %>% 
+  group_by(id) %>%
+  count(word) %>% 
+  arrange(desc(n))
+
+word_count <- news_df %>%
+  unnest_tokens(word, text) %>% 
+  anti_join(stop_words, by="word") %>% 
+  group_by(word) %>%
+  count() %>% 
+  arrange(desc(n))
+
+word_count %>% 
+  with(wordcloud(
+    word, n, min.freq = 2, max.words = 100, random.order = FALSE, scale=c(2.5,.4),
+    colors = brewer.pal(8, "Dark2")))
+```
+
+```{r}
+endpoint <- URLencode("http://content.guardianapis.com/tags?api-key=test")
+r <- GET(endpoint, query = list(page-size="1000", section="world"))
+stop_for_status(r)
+json <- content(r, as = "text", encoding = "UTF-8")
+query_response <- fromJSON(json, flatten = TRUE)
+query_response
+```
+
+```{r}
+# Trying to find correct countries
+countries <- gapminder %>% 
+  select(country, continent) %>% 
+  distinct()
+
+valid_countries <- NULL
+for (i in seq_len(nrow(countries))) {
+  c <- tolower(countries[[i,'country']])
+  endpoint <- URLencode(paste("http://content.guardianapis.com/world/", 
+                   c, "?api-key=", myKey, sep=""))
+
+  r <- GET(endpoint)
+  if (r$status_code == 200) {
+    valid_countries <- bind_rows(
+      valid_countries,
+      tibble(country=c, continent=countries[[i,'continent']])
+    )
+  }
+
+}
+
+valid_countries
+```
+
+
+
+
+```{r}
+endpoint <- URLencode(paste("http://content.guardianapis.com/sections?api-key=", myKey, sep=""))
+r <- GET(endpoint, query = list())
+stop_for_status(r)
+json <- content(r, as = "text", encoding = "UTF-8")
+query_response <- fromJSON(json, flatten = TRUE)
+sections <- query_response$response$results %>% select(id)
+```
+
+```{r}
+endpoint <- URLencode(paste("http://content.guardianapis.com/world?page-size=200&api-key=", myKey, sep=""))
+r <- GET(endpoint, query = list())
+stop_for_status(r)
+json <- content(r, as = "text", encoding = "UTF-8")
+query_response <- fromJSON(json, flatten = TRUE)
+query_df <- query_response$response$results
+
+nrow(query_df)
+
+news_df <- NULL
+for (i in seq_len(nrow(query_df))) {
+  temp_url <- query_df[i,'webUrl']
+  html <- read_html(temp_url)
+  
+  text <- html %>%
+    html_nodes("p") %>%
+    html_text()
+  text <- paste(text, collapse = '')
+
+  news_df <- bind_rows(
+    news_df,
+    tibble(id=i, text=text)
+  )
+}
+
+data(stop_words)
+news_df2 <- news_df %>%
+  unnest_tokens(word, text) %>% 
+  anti_join(stop_words, by="word") %>% 
+  group_by(id) %>%
+  count(word) %>% 
+  arrange(desc(n))
+
+word_count <- news_df %>%
+  unnest_tokens(word, text) %>% 
+  anti_join(stop_words, by="word") %>% 
+  group_by(word) %>%
+  count() %>% 
+  arrange(desc(n))
+
+word_count %>% 
+  with(wordcloud(
+    word, n, min.freq = 2, max.words = 100, random.order = FALSE, scale=c(2.5,.4),
+    colors = brewer.pal(8, "Dark2")))
+
+
+df <- news_df %>%
+  unnest_tokens(word, text) %>% 
+  anti_join(stop_words, by="word") %>% 
+  group_by(id, word) %>%
+  count()
+
+df_word_count <- df %>% 
+  group_by(word) %>% 
+  summarize(total_frequency=sum(n)) %>% 
+  arrange(desc(total_frequency))
+
+df_word_count %>% 
+  filter(word="15")
+
+df_news_count <- df %>% 
+  select(id, word) %>% 
+  distinct(id, word) %>% 
+  group_by(word) %>% 
+  summarize(n_news=n()) %>% 
+  arrange(desc(n_news))
+
+df_final <- df %>% 
+  bind_tf_idf(word, id, n) %>%
+  inner_join(df_word_count, by="word") %>%
+  inner_join(df_news_count, by="word") %>%
+  arrange(desc(tf_idf)) %>% 
+  ungroup() %>% 
+  slice(1:10) %>% 
+  select(word, total_frequency, n_news, tf, idf, tf_idf)
+```
+
+```{r}
+news_df2 %>% 
+  ungroup() %>% 
+  slice(1:10)
+```
+
+```{r}
+endpoint <- URLencode(paste("http://content.guardianapis.com/", "world", 
+                            "?page-size=", 10, "&api-key=", myKey, sep=""))
+r <- GET(endpoint, query = list())
+stop_for_status(r)
+json <- content(r, as = "text", encoding = "UTF-8")
+query_response <- fromJSON(json, flatten = TRUE)
+query_df <- query_response$response$results
+
+news_content_df <- NULL
+for (i in seq_len(nrow(query_df))) {
+  temp_url <- query_df[i,'webUrl']
+  html <- read_html(temp_url)
+  
+  text <- html %>%
+    html_nodes("p") %>%
+    html_text()
+  text <- paste(text, collapse = '')
+  d <- as.Date(substr(query_df[i,'webPublicationDate'], 1, 10))
+  
+  news_content_df <- bind_rows(
+    news_content_df,
+    tibble(id=i, text=text, date=d)
+  )
+}
+
+get_sentiments("nrc")
+
+df <- news_df %>%
+  unnest_tokens(word, text) %>% 
+  anti_join(stop_words, by="word") %>% 
+  group_by(word) %>% # Change this to group by news instead
+  count() %>% 
+  inner_join(get_sentiments("nrc"), by="word") %>% 
+  group_by(sentiment) %>% 
+  count() %>% 
+  arrange(desc(n))
+
+df
+
+```
