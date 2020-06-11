@@ -2,8 +2,6 @@ readRenviron(".Renviron")
 library(shiny)
 library(dplyr)
 library(httr)
-library(rvest)
-library(httr)
 library(tidyverse)
 library(tidytext)
 library(jsonlite)
@@ -13,6 +11,8 @@ library(gapminder)
 library(textdata)
 library(shinythemes)
 library(plotly)
+library(RColorBrewer)
+library(sentimentr)
 myKey <- Sys.getenv("THE_GUARDIAN_KEY")
 
 a <-"
@@ -29,15 +29,25 @@ url = {https://onlinelibrary.wiley.com/doi/abs/10.1111/j.1467-8640.2012.00460.x}
 eprint = {https://onlinelibrary.wiley.com/doi/pdf/10.1111/j.1467-8640.2012.00460.x},
 year = {2013}
 }
+
+# How to deploy: https://www.shinyapps.io/admin/#/dashboard
+# To deploy the app run:
+# library(rsconnect)
+# rsconnect::deployApp('path/to/your/app')
+
 "
 
 ui <- fluidPage(
   theme = shinytheme("cerulean"),
+  
+  # Set the title of the web browser tab
+  title = "The Guardian Stats",
+  
   titlePanel(h1('The Guardian Stats', align="center")),
   
   navbarPage("Menu",
     tabPanel(
-      "Word frequencies and tf-idf analysis", 
+      "Analysis", 
       
       # Sidebar layout with input and output definitions
       sidebarLayout(
@@ -63,7 +73,7 @@ ui <- fluidPage(
             
             tabPanel(
               "Sentiment Analysis",
-              column(8, plotlyOutput("pieChart", height=700, width = "130%"))
+              column(8, plotlyOutput("pieChart", height = 700, width = "130%"))
             )
           )
         )
@@ -71,8 +81,13 @@ ui <- fluidPage(
       )
     ),
     tabPanel(
+      "About",
+      h4(paste("This Shiny app scraps the last news from the selected section of The Guardian and",
+         " displays some data about it. You can also select how many news are scrapped."))
+    ),
+    tabPanel(
       "Github link",
-      h4("I will add a link to the code on github soon.")
+      h4(uiOutput("githubLink"))
     )
   )
 )
@@ -137,12 +152,31 @@ server <- function(input, output, session) {
     return(news_content_df)
   })
   
+  # This variable holds a dataset equivalent to calling `get_sentiments("nrc")`
+  # That call doesn't work on deployment because it needs interaction (it has a menu)
+  # I had to swim through github to find where the data is kept
+  # (https://github.com/EmilHvitfeldt/textdata/blob/ef8d9af6d99f15b16373575dd96502e9f674bd65/R/lexicon_nrc.R)
+  # Then download it and use it locally.
+  # I submitted an issue to fix this behaviour:
+  # https://github.com/EmilHvitfeldt/textdata/issues/33
+  sentiments_df <- reactive({
+    df <- read.table("NRC-Emotion-Lexicon-Wordlevel-v0.92.txt", header = FALSE,
+                     sep = "", dec = ".", stringsAsFactors = FALSE,)
+    colnames(df) <- c("word", "sentiment", "val")
+    df <- df %>% 
+      filter(val == 1) %>% 
+      select("word", "sentiment")
+    
+    return(df)
+  })
+  
   ### DISPLAYED STUFF ###
   
   # Title before the wordcloud
   output$wordcloudTitle <- renderText({
     req(input$section != "-" && !is.null(nrow(query_df())))
-    paste("Words that appeared the most in the last ", input$n_news, "news from this section:")
+    paste("Words that appeared the most in the last ", input$n_news, 
+          "news from this section:", sep="")
   })
   
   # Plot the Wordcloud
@@ -217,7 +251,7 @@ server <- function(input, output, session) {
   
   # Pie chart for sentinet analysis
   output$pieChart <- renderPlotly({
-    # Don't display any output and display error messages instead.
+    # Don't display any output and display error messages if no option has been selected.
     shiny::validate(
       need(input$section != "-", "Please, choose a section")
     )
@@ -231,17 +265,28 @@ server <- function(input, output, session) {
       anti_join(stop_words, by="word") %>% 
       group_by(word) %>% # Change this to group by news instead
       count() %>% 
-      inner_join(get_sentiments("nrc"), by="word") %>% 
+      inner_join(sentiments_df(), by="word") %>% 
       group_by(sentiment) %>% 
       count() %>% 
       arrange(desc(n))
     
+    labels <- df[['sentiment']]
+    values <- df[['n']]
     plot_ly(
-      type = "pie", labels=df[['sentiment']], values=df[['n']],
+      type = "pie", labels=labels, values=values,
       textinfo = "label",
       insidetextorientation = "radial"
     ) %>%
-      layout(title = "Title goes here")
+      layout(title = paste("Word by word sentiment analysis of the last ", 
+                           input$n_news, " news.", sep=""))
+    
+  })
+  
+  # Configure the Github Link displayer
+  output$githubLink <- renderUI({
+    githubUrl <- a("https://github.com/Ocete/ucdavis-sta141b-sq-2020-final-project-Ocete", 
+                   href="https://github.com/Ocete/ucdavis-sta141b-sq-2020-final-project-Ocete")
+    tagList("URL link:", githubUrl)
   })
 }
 

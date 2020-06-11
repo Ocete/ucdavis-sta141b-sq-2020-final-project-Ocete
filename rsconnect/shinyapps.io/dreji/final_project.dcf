@@ -1,0 +1,13 @@
+name: final_project
+title:
+username:
+account: dreji
+server: shinyapps.io
+hostUrl: https://api.shinyapps.io/v1
+appId: 2435564
+bundleId: 3254830
+url: https://dreji.shinyapps.io/final_project/
+when: 1591840471.72085
+asMultiple: FALSE
+asStatic: FALSE
+ignoredFiles: temp.Rmd
